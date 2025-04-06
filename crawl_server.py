@@ -1,279 +1,167 @@
 from mcp.server.fastmcp import FastMCP
 import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, LLMConfig
+from crawl4ai.extraction_strategy import LLMExtractionStrategy
+from bs4 import BeautifulSoup
 import json
-from typing import Optional, Dict, List, Any, Union
-
-# Import Crawl4AI components
-from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig, CacheMode, LLMConfig
-from crawl4ai.extraction_strategy import (
-    JsonCssExtractionStrategy,
-    LLMExtractionStrategy
-)
-from crawl4ai.content_filter_strategy import PruningContentFilter
-from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
-print("[CrawlServer] Environment variables loaded.")
 
-# Create an MCP server for web crawling
-mcp = FastMCP("WebCrawl")
-mcp.settings.port = 8001
-print("[CrawlServer] MCP server 'WebCrawl' created on port 8001.")
+# Get available API keys
+GOOGLE_API_KEY = os.environ.get("GOOGLE2_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 
-# Create a shared crawler instance
-crawler = None
-browser_config = BrowserConfig(
-    headless=True,
-    java_script_enabled=True,
-    ignore_https_errors=True,
-    viewport_width=1280,
-    viewport_height=800,
-)
-openai_api_key = os.environ.get("OPENAI_API_KEY")
+# Log available keys for debugging
+print(f"[INIT].... → GOOGLE_API_KEY available: {GOOGLE_API_KEY is not None}")
+print(f"[INIT].... → OPENAI_API_KEY available: {OPENAI_API_KEY is not None and OPENAI_API_KEY != ''}")
+print(f"[INIT].... → MISTRAL_API_KEY available: {MISTRAL_API_KEY is not None and MISTRAL_API_KEY != ''}")
 
-# Helper function to get or create crawler
-async def get_crawler():
-    global crawler
-    if crawler is None:
-        print("[CrawlServer] Initializing new crawler instance.")
-        crawler = await AsyncWebCrawler(config=browser_config).__aenter__()
-    else:
-        print("[CrawlServer] Using existing crawler instance.")
-    return crawler
+mcp = FastMCP("webcrawl")
 
-# Basic crawl tool - returns markdown content
+mcp.settings.port = 8002
+
+
 @mcp.tool()
-async def crawl_page(url: str, use_cache: bool = True) -> Dict[str, Any]:
-    print(f"[CrawlServer] Starting crawl_page for URL: {url}")
-    crawler = await get_crawler()
-    run_config = CrawlerRunConfig(
-        cache_mode=CacheMode.ENABLED if use_cache else CacheMode.BYPASS,
-        word_count_threshold=10,
-        remove_overlay_elements=True,
-    )
-    result = await crawler.arun(url=url, config=run_config)
-    if not result.success:
-        print(f"[CrawlServer] crawl_page failed for URL: {url} with error: {result.error_message}")
-        return {
-            "success": False,
-            "error": result.error_message,
-            "status_code": result.status_code
-        }
-    print(f"[CrawlServer] crawl_page succeeded for URL: {url}")
+async def scrape_url(url: str) -> str:
+    """
+    Scrape a webpage and return its content.
     
-    # Safely get attributes with fallback values
-    title = getattr(result, 'title', 'No title available')
-    word_count = getattr(result, 'word_count', 0)
-    
-    # Safely handle links and images that might be missing or have different structure
-    links_internal = getattr(result.links, 'internal', []) if hasattr(result, 'links') else []
-    links_external = getattr(result.links, 'external', []) if hasattr(result, 'links') else []
-    images = getattr(result.media, 'images', []) if hasattr(result, 'media') and isinstance(result.media, dict) else []
-    
-    return {
-        "success": True,
-        "title": title,
-        "url": result.url,
-        "markdown": result.markdown.raw_markdown,
-        "word_count": word_count,
-        "links_count": len(links_internal) + len(links_external),
-        "images_count": len(images),
-    }
-
-# Get filtered markdown with content filtering
-@mcp.tool()
-async def get_filtered_content(url: str, query: Optional[str] = None, threshold: float = 0.4) -> Dict[str, Any]:
-    print(f"[CrawlServer] Starting get_filtered_content for URL: {url} with query: {query}")
-    crawler = await get_crawler()
-    if query:
-        from crawl4ai.content_filter_strategy import BM25ContentFilter
-        content_filter = BM25ContentFilter(query=query, threshold=threshold)
-    else:
-        content_filter = PruningContentFilter(threshold=threshold, threshold_type="fixed")
-    md_generator = DefaultMarkdownGenerator(content_filter=content_filter)
-    run_config = CrawlerRunConfig(
-        cache_mode=CacheMode.BYPASS,
-        markdown_generator=md_generator,
-    )
-    result = await crawler.arun(url=url, config=run_config)
-    if not result.success:
-        print(f"[CrawlServer] get_filtered_content failed for URL: {url} with error: {result.error_message}")
-        return {
-            "success": False,
-            "error": result.error_message,
-            "status_code": result.status_code
-        }
-    print(f"[CrawlServer] get_filtered_content succeeded for URL: {url}")
-    return {
-        "success": True,
-        "title": result.title,
-        "url": result.url,
-        "raw_markdown": result.markdown.raw_markdown,
-        "filtered_markdown": result.markdown.fit_markdown,
-        "word_count": result.word_count,
-    }
-
-# Extract structured data using CSS selectors
-@mcp.tool()
-async def extract_structured_data(url: str, schema: Dict[str, Any], use_cache: bool = True) -> Dict[str, Any]:
-    print(f"[CrawlServer] Starting extract_structured_data for URL: {url} with schema: {schema}")
-    crawler = await get_crawler()
-    extraction_strategy = JsonCssExtractionStrategy(schema)
-    run_config = CrawlerRunConfig(
-        cache_mode=CacheMode.ENABLED if use_cache else CacheMode.BYPASS,
-        extraction_strategy=extraction_strategy,
-    )
-    result = await crawler.arun(url=url, config=run_config)
-    if not result.success:
-        print(f"[CrawlServer] extract_structured_data failed for URL: {url} with error: {result.error_message}")
-        return {
-            "success": False,
-            "error": result.error_message,
-            "status_code": result.status_code
-        }
-    extracted_data = json.loads(result.extracted_content) if result.extracted_content else {}
-    print(f"[CrawlServer] extract_structured_data succeeded for URL: {url}")
-    return {
-        "success": True,
-        "url": result.url,
-        "data": extracted_data,
-    }
-
-# Generate CSS extraction schema using LLM
-@mcp.tool()
-async def generate_extraction_schema(url: str, description: str, llm_provider: str = "openai/gpt-3.5-turbo") -> Dict[str, Any]:
-    print(f"[CrawlServer] Starting generate_extraction_schema for URL: {url} with description: {description}")
-    if not openai_api_key and "openai" in llm_provider:
-        return {"success": False, "error": "OpenAI API key is required for this operation"}
-    
+    Args:
+        url: The URL of the webpage to scrape
+        
+    Returns:
+        The webpage content in markdown format
+    """
     try:
-        crawler = await get_crawler()
-        run_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS)
-        result = await crawler.arun(url=url, config=run_config)
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(url=url)
+            return result.markdown.raw_markdown if result.markdown else "No content found"
+    except Exception as e:
+        return f"Error scraping URL: {str(e)}"
+
+
+@mcp.tool()
+async def extract_text_by_query(url: str, query: str, context_size: int = 300) -> str:
+    """
+    Extract relevant text from a webpage based on a search query.
+    
+    Args:
+        url: The URL of the webpage to search
+        query: The search query to look for in the content
+        context_size: Number of characters around the matching text to include (default: 300)
         
-        if not result.success:
-            return {"success": False, "error": result.error_message, "status_code": result.status_code}
-        
-        # Safely get HTML content
-        html_content = getattr(result, 'html', '')
-        if not html_content:
-            return {"success": False, "error": "No HTML content found in the crawl result"}
+    Returns:
+        The relevant text snippets containing the query
+    """
+    try:
+        async with AsyncWebCrawler() as crawler:
+            result = await crawler.arun(url=url)
             
-        html_sample = html_content[:10000]
-        
-        api_token = openai_api_key if "openai" in llm_provider else None
-        llm_config = LLMConfig(provider=llm_provider, api_token=api_token)
-        schema = await JsonCssExtractionStrategy.generate_schema(
-            html=html_sample,
-            llm_config=llm_config,
-            instruction=description
-        )
-        
-        print(f"[CrawlServer] generate_extraction_schema succeeded for URL: {url}")
-        return {"success": True, "schema": schema}
-    except Exception as e:
-        print(f"[CrawlServer] generate_extraction_schema failed with exception: {str(e)}")
-        return {"success": False, "error": f"Exception occurred: {str(e)}"}
-
-# Extract data using LLM
-@mcp.tool()
-async def extract_with_llm(url: str, instruction: str, llm_provider: str = "openai/gpt-3.5-turbo") -> Dict[str, Any]:
-    print(f"[CrawlServer] Starting extract_with_llm for URL: {url} with instruction: {instruction}")
-    if not openai_api_key and "openai" in llm_provider:
-        return {"success": False, "error": "OpenAI API key is required for this operation"}
-    
-    try:
-        crawler = await get_crawler()
-        api_token = openai_api_key if "openai" in llm_provider else None
-        llm_config = LLMConfig(provider=llm_provider, api_token=api_token)
-        extraction_strategy = LLMExtractionStrategy(
-            llm_config=llm_config,
-            instruction=instruction,
-            extraction_type="free_text",
-            extra_args={"temperature": 0}
-        )
-        run_config = CrawlerRunConfig(
-            cache_mode=CacheMode.BYPASS,
-            extraction_strategy=extraction_strategy,
-        )
-        result = await crawler.arun(url=url, config=run_config)
-        
-        if not result.success:
-            return {"success": False, "error": result.error_message, "status_code": result.status_code}
-        
-        # Safely get extracted content
-        extracted_content = getattr(result, 'extracted_content', '')
-        
-        print(f"[CrawlServer] extract_with_llm succeeded for URL: {url}")
-        return {"success": True, "url": result.url, "extracted_content": extracted_content}
-    except Exception as e:
-        print(f"[CrawlServer] extract_with_llm failed with exception: {str(e)}")
-        return {"success": False, "error": f"Exception occurred: {str(e)}"}
-
-# Run multiple URL crawling in parallel
-@mcp.tool()
-async def crawl_multiple_urls(urls: List[str], max_concurrent: int = 5, get_markdown: bool = True) -> Dict[str, Any]:
-    print(f"[CrawlServer] Starting crawl_multiple_urls for URLs: {urls}")
-    crawler = await get_crawler()
-    run_config = CrawlerRunConfig(cache_mode=CacheMode.BYPASS, stream=True)
-    results = []
-    try:
-        async for result in await crawler.arun_many(urls, config=run_config):
-            if result.success:
-                # Safely get attributes with fallback values
-                title = getattr(result, 'title', 'No title available')
-                word_count = getattr(result, 'word_count', 0)
+            # Get the text content from the markdown result
+            if not result.markdown or not result.markdown.raw_markdown:
+                return f"No text content found for URL: {url}"
                 
-                url_result = {
-                    "success": True,
-                    "url": result.url,
-                    "title": title,
-                    "status_code": result.status_code,
-                    "word_count": word_count,
-                }
-                if get_markdown:
-                    # Safely handle markdown content
-                    markdown_content = ""
-                    if hasattr(result, 'markdown') and hasattr(result.markdown, 'raw_markdown'):
-                        markdown_content = result.markdown.raw_markdown
-                    url_result["markdown"] = markdown_content
-                results.append(url_result)
-            else:
-                results.append({
-                    "success": False,
-                    "url": result.url,
-                    "error": result.error_message,
-                    "status_code": result.status_code
-                })
-        print(f"[CrawlServer] crawl_multiple_urls completed for {len(results)} URLs.")
+            full_text = result.markdown.raw_markdown
+            
+            
+            query = query.lower()
+            matches = []
+            
+            if query in full_text.lower():
+                
+                positions = []
+                current_pos = 0
+                lower_text = full_text.lower()
+                
+                while True:
+                    pos = lower_text.find(query, current_pos)
+                    if pos == -1:
+                        break
+                    positions.append(pos)
+                    current_pos = pos + len(query)
+                
+                
+                for pos in positions:
+                    start = max(0, pos - context_size)
+                    end = min(len(full_text), pos + len(query) + context_size)
+                    context = full_text[start:end]
+                    matches.append(context)
+                
+                if matches:
+                    
+                    matches = matches[:5]
+                    result_text = "\n\n---\n\n".join([f"Match {i+1}:\n{match}" 
+                                                    for i, match in enumerate(matches)])
+                    return f"Found {len(matches)} matches for '{query}' on the page. Here are the relevant sections:\n\n{result_text}"
+            
+            return f"No matches found for '{query}' on the page."
     except Exception as e:
-        print(f"[CrawlServer] crawl_multiple_urls encountered an error: {str(e)}")
-        return {"success": False, "error": str(e), "partial_results": results}
-    return {"success": True, "total": len(results), "results": results}
+        return f"Error searching page: {str(e)}"
 
-# Cleanup function
-async def cleanup():
-    global crawler
-    if crawler is not None:
-        print("[CrawlServer] Cleaning up crawler instance.")
-        await crawler.__aexit__(None, None, None)
-        crawler = None
 
-# Start the server
-if __name__ == "__main__":
-    try:
-        print("[CrawlServer] Starting Crawl4AI MCP Server...")
-        print("[CrawlServer] Available endpoints:")
-        print(" - crawl_page: Basic web page crawling")
-        print(" - get_filtered_content: Get filtered markdown content")
-        print(" - extract_structured_data: Extract structured data using CSS")
-        print(" - generate_extraction_schema: Generate CSS schema using LLM")
-        print(" - extract_with_llm: Extract information using LLM")
-        print(" - crawl_multiple_urls: Crawl multiple URLs in parallel")
+@mcp.tool()
+async def smart_extract(url: str, instruction: str) -> str:
+    """
+    Intelligently extract specific information from a webpage using LLM-based extraction.
+    
+    Args:
+        url: The URL of the webpage to analyze
+        instruction: Natural language instruction specifying what information to extract
+                    (e.g., "Extract all mentions of machine learning and its applications")
         
-        mcp.run(transport="sse")
-    finally:
-        asyncio.run(cleanup())
+    Returns:
+        The extracted information based on the instruction
+    """
+    try:
+        
+        if GOOGLE_API_KEY:
+            print(f"[EXTRACT] Using Google Gemini API directly")
+            
+           
+            extraction_strategy = LLMExtractionStrategy(
+                llm_config=LLMConfig(
+                    provider="gemini/gemini-2.0-flash",  
+                    api_token=GOOGLE_API_KEY
+                ),
+                extraction_type="natural", 
+                instruction=instruction,
+                extra_args={"temperature": 0.2} 
+            )
+            
+            # Configure the crawler run
+            config = CrawlerRunConfig(
+                extraction_strategy=extraction_strategy
+            )
+            
+            
+            async with AsyncWebCrawler() as crawler:
+                result = await crawler.arun(url=url, config=config)
+                
+               
+                if result.extracted_content:
+                    # Clean up the extracted content (remove extra quotes if JSON string)
+                    content = result.extracted_content
+                    try:
+                        
+                        parsed = json.loads(content)
+                        content = json.dumps(parsed, indent=2)
+                    except:
+                       
+                        pass
+                    
+                    return f"Successfully extracted information based on your instruction:\n\n{content}"
+                else:
+                    return f"No relevant information found for your instruction: '{instruction}'"
+        else:
+            return "Error: Google API key not found. Please set GOOGLE_API_KEY in your environment."
+    except Exception as e:
+        return f"Error during intelligent extraction: {str(e)}"
+
+
+if __name__ == "__main__":
+    # Run the server using SSE transport
+    mcp.run(transport="sse")
