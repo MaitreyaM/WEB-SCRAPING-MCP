@@ -7,15 +7,12 @@ import json
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
-# Get available API keys
 GOOGLE_API_KEY = os.environ.get("GOOGLE2_API_KEY")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 
-# Log available keys for debugging
 print(f"[INIT].... → GOOGLE_API_KEY available: {GOOGLE_API_KEY is not None}")
 print(f"[INIT].... → OPENAI_API_KEY available: {OPENAI_API_KEY is not None and OPENAI_API_KEY != ''}")
 print(f"[INIT].... → MISTRAL_API_KEY available: {MISTRAL_API_KEY is not None and MISTRAL_API_KEY != ''}")
@@ -163,5 +160,4 @@ async def smart_extract(url: str, instruction: str) -> str:
 
 
 if __name__ == "__main__":
-    # Run the server using SSE transport
     mcp.run(transport="sse")
