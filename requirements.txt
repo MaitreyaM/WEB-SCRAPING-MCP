@@ -23,3 +23,7 @@ python-dotenv
 # Potentially needed by crawl4ai or underlying libraries, good to include
 # httpx >= 0.27.0 # Usually installed by crawl4ai/mcp
 # beautifulsoup4 >= 4.12.2 # Usually installed by crawl4ai
+
+# RSS Feed parsing
+feedparser>=6.0.0
+beautifulsoup4>=4.12.0

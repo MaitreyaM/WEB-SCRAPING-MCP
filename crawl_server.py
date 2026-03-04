@@ -6,6 +6,8 @@ from bs4 import BeautifulSoup
 import json
 import os
 from dotenv import load_dotenv
+import feedparser
+from datetime import datetime
 
 load_dotenv()
 
@@ -157,6 +159,71 @@ async def smart_extract(url: str, instruction: str) -> str:
             return "Error: Google API key not found. Please set GOOGLE_API_KEY in your environment."
     except Exception as e:
         return f"Error during intelligent extraction: {str(e)}"
+
+
+@mcp.tool()
+async def parse_rss_feed(feed_url: str, max_items: int = 10) -> str:
+    """
+    Parse an RSS or Atom feed and return recent entries.
+    
+    Args:
+        feed_url: The URL of the RSS/Atom feed to parse
+        max_items: Maximum number of recent items to return (default: 10, max: 50)
+        
+    Returns:
+        A formatted list of feed entries with title, link, published date, and summary
+    """
+    try:
+        # Validate max_items
+        max_items = min(max(1, max_items), 50)
+        
+        # Parse the feed
+        feed = feedparser.parse(feed_url)
+        
+        if not feed.entries:
+            return f"No entries found in feed: {feed_url}"
+        
+        # Get feed info
+        feed_title = feed.feed.get('title', 'Unknown Feed')
+        feed_link = feed.feed.get('link', 'No link available')
+        
+        # Format entries
+        entries = []
+        for i, entry in enumerate(feed.entries[:max_items], 1):
+            title = entry.get('title', 'No title')
+            link = entry.get('link', 'No link')
+            
+            # Get published date
+            published = entry.get('published', entry.get('updated', 'No date'))
+            
+            # Get summary/description
+            summary = entry.get('summary', entry.get('description', 'No summary'))
+            # Clean up HTML if present
+            if summary and '<' in summary:
+                soup = BeautifulSoup(summary, 'html.parser')
+                summary = soup.get_text(separator=' ', strip=True)
+            # Truncate long summaries
+            if len(summary) > 500:
+                summary = summary[:500] + "..."
+            
+            entries.append(f"""
+{i}. {title}
+   Link: {link}
+   Published: {published}
+   Summary: {summary}
+""")
+        
+        result = f"""Feed: {feed_title}
+URL: {feed_link}
+Total Entries: {len(feed.entries)}
+Showing: {min(max_items, len(feed.entries))} most recent
+
+{''.join(entries)}
+"""
+        return result.strip()
+        
+    except Exception as e:
+        return f"Error parsing RSS feed: {str(e)}"
 
 
 if __name__ == "__main__":

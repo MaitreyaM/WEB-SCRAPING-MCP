@@ -62,6 +62,19 @@ Intelligently extract specific information from a webpage using the configured L
 
 *   (str): The extracted information (often formatted as JSON or structured text based on the instruction) or a message indicating no relevant information was found, or an error message (including if the required API key is missing).
 
+### `parse_rss_feed`
+
+Parse an RSS or Atom feed and return recent entries with title, link, published date, and summary.
+
+**Arguments:**
+
+*   `feed_url` (str, **required**): The URL of the RSS/Atom feed to parse (e.g., "https://news.ycombinator.com/rss", "https://feeds.bbci.co.uk/news/rss.xml").
+*   `max_items` (int, *optional*): Maximum number of recent items to return. Defaults to `10`, maximum is `50`.
+
+**Returns:**
+
+*   (str): A formatted list of feed entries including title, link, published date, and summary, or an error message.
+
 ## Setup and Running
 
 You can run this server either locally or using the provided Docker configuration.
@@ -170,6 +183,24 @@ Agent: Successfully extracted information based on your instruction:
     "Being integrated into Google products like Bard and Pixel."
   ]
 }
+------------------------------
+You: parse_rss_feed https://news.ycombinator.com/rss max_items=5
+Agent: Thinking...
+[Agent calls parse_rss_feed tool]
+Agent: Feed: Hacker News
+URL: https://news.ycombinator.com
+Total Entries: 30
+Showing: 5 most recent
+
+1. Show HN: My new open source project
+   Link: https://example.com/project
+   Published: Mon, 04 Mar 2026 12:00:00 GMT
+   Summary: A new tool for developers...
+
+2. The future of AI agents
+   Link: https://blog.example.com/ai-agents
+   Published: Mon, 04 Mar 2026 10:30:00 GMT
+   Summary: Exploring the possibilities...
 
 ```
 
